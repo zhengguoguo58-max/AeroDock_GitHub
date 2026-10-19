@@ -1,0 +1,43 @@
+# ============================================================
+# AeroDock .gitignore
+# ============================================================
+
+# ---- Build output / 构建产物 ----
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+
+# ---- Visual Studio / VS 缓存 ----
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ---- Build artifacts / 编译中间产物 ----
+*.pdb
+*.cache
+
+# ---- Logs & diagnostics / 日志与诊断文件 ----
+*.log
+*.dmp
+*.dump
+
+# ---- Test results / 测试结果 ----
+TestResults/
+*.coverage
+*.trx
+
+# ---- OS generated files / 系统文件 ----
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+
+# ---- Local-only settings / 本地私有配置 ----
+appsettings.local.json

@@ -1,0 +1,3103 @@
+﻿<Window x:Class="GlassDock.MainWindow"
+
+        Title="AeroDock"
+
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+
+        xmlns:local="clr-namespace:GlassDock"
+
+        Width="560"
+
+        Height="284"
+
+        WindowStyle="None"
+
+        AllowsTransparency="True"
+
+        Background="Transparent"
+
+        ResizeMode="NoResize"
+
+        ShowInTaskbar="False"
+
+        Icon="Assets\app.ico"
+
+        Topmost="False"
+
+        AllowDrop="True"
+
+        UseLayoutRounding="True"
+
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
+
+        Deactivated="Window_Deactivated"
+
+
+        SnapsToDevicePixels="True">
+
+
+
+
+
+    <!-- ================================= -->
+    <!-- 点击外部关闭（本次新增，只加一个监听）  -->
+    <!-- 挂在窗口根级别：                    -->
+    <!--   PreviewMouseLeftButtonDown        -->
+    <!-- 只做“点在哪”的判断：                -->
+    <!--   非左键（右键 / 中键）→ 立刻 return  -->
+    <!--     （右键是弹“移除”菜单的，绝不能关板）-->
+    <!--   点在展板内部 / 九点阵 / Dock 上     -->
+    <!--   → 立刻 return，什么都不做          -->
+    <!--   只有点在展板外的空白处             -->
+    <!--   → 才调用现有展板关闭逻辑（带淡出动画）-->
+    <!-- 九点阵原有的打开 / 关闭逻辑一行未改   -->
+    <!-- ================================= -->
+
+
+    <!-- ================================= -->
+    <!-- 点击外部关闭（第二个监听）            -->
+    <!--   Deactivated                       -->
+    <!-- 原因：桌面在窗口矩形之外，          -->
+    <!--   鼠标事件永远收不到，只能靠"失焦"触发 -->
+    <!-- 【本次修复】失焦只是"触发点"，       -->
+    <!--   不是"结论"。真正决定关不关的是     -->
+    <!--   Window_Deactivated 里的三重判断：  -->
+    <!--     a. 右键菜单 / "移除"确认框正在弹 → 不关 -->
+    <!--     b. 鼠标此刻还停在窗口矩形里      -->
+    <!--        （说明是窗口自己的弹出物抢了焦点）→ 不关 -->
+    <!--     c. 只有鼠标确实在窗口矩形之外     -->
+    <!--        （用户真的跑去点桌面 / 别的程序）→ 才关 -->
+    <!-- 这样右键点图标弹"移除"菜单时，       -->
+    <!--   展板绝不会被误关                    -->
+    <!-- 九点阵、拖拽、收缩成圆、托盘一行未改   -->
+    <!-- ================================= -->
+
+
+    <Window.Resources>
+
+        <!-- ================================= -->
+        <!-- 统一图标转换器：Dock 与展板共用        -->
+        <!-- 不判断后缀，一律找系统要该路径的高清图标 -->
+        <!-- 输入：LaunchPath（首选）+ IconPath（兜底） -->
+        <!-- ================================= -->
+
+        <local:ShellIconConverter x:Key="ShellIconConverter"/>
+
+
+        <!-- ================================= -->
+        <!-- 展板批量管理：小胶囊按钮样式            -->
+        <!-- 管理 / 全选 / 取消全选 / 删除选中 共用   -->
+        <!-- ================================= -->
+
+        <Style x:Key="BoardBatchButtonStyle"
+               TargetType="Button">
+
+            <Setter Property="Foreground"
+                    Value="#F2FFFFFF"/>
+
+            <Setter Property="FontSize"
+                    Value="12"/>
+
+            <Setter Property="Cursor"
+                    Value="Hand"/>
+
+            <Setter Property="Padding"
+                    Value="14,5"/>
+
+            <Setter Property="Background"
+                    Value="#26FFFFFF"/>
+
+            <Setter Property="BorderThickness"
+                    Value="0"/>
+
+            <Setter Property="Focusable"
+                    Value="False"/>
+
+            <Setter Property="Template">
+
+                <Setter.Value>
+
+                    <ControlTemplate TargetType="Button">
+
+                        <Border x:Name="BoardBatchButtonBg"
+                                CornerRadius="15"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="#3DFFFFFF"
+                                BorderThickness="1"
+                                Padding="{TemplateBinding Padding}">
+
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+
+                        </Border>
+
+                        <ControlTemplate.Triggers>
+
+                            <Trigger Property="IsMouseOver"
+                                     Value="True">
+
+                                <Setter TargetName="BoardBatchButtonBg"
+                                        Property="Background"
+                                        Value="#40FFFFFF"/>
+
+                            </Trigger>
+
+                            <Trigger Property="IsPressed"
+                                     Value="True">
+
+                                <Setter TargetName="BoardBatchButtonBg"
+                                        Property="Background"
+                                        Value="#66FFFFFF"/>
+
+                            </Trigger>
+
+                            <Trigger Property="IsEnabled"
+                                     Value="False">
+
+                                <Setter Property="Opacity"
+                                        Value="0.4"/>
+
+                            </Trigger>
+
+                        </ControlTemplate.Triggers>
+
+                    </ControlTemplate>
+
+                </Setter.Value>
+
+            </Setter>
+
+        </Style>
+
+    </Window.Resources>
+
+
+
+
+    <Grid x:Name="RootGrid"
+
+          AllowDrop="True"
+
+          Drop="Dock_Drop"
+
+          DragOver="Dock_DragOver"
+
+          UseLayoutRounding="True"
+
+          SnapsToDevicePixels="True">
+
+        <!-- ================================= -->
+        <!-- 窗口高度 284（原来是 244）             -->
+        <!-- 原因：设置面板里又多了一行             -->
+        <!--       “桌面图标处理模式”               -->
+        <!--       面板从 136 加高到 176，窗口也要    -->
+        <!--       跟着加高，否则面板顶部会被窗口    -->
+        <!--       边界裁掉（面板底边距窗口底边 104） -->
+        <!-- 布局：Dock 高 100 贴窗口底边            -->
+        <!--       面板 176 + 底边距 104 = 280       -->
+        <!--       顶部还剩 4px 余量（和原来一样）    -->
+        <!-- 多出来的高度全是透明像素，鼠标可穿透，   -->
+        <!-- 收缩圆 / 拖拽 / 托盘 / 图标都不受影响   -->
+        <!-- ================================= -->
+
+
+
+
+
+
+        <!-- ================================= -->
+        <!-- 大展板：九点按钮弹出的空白面板          -->
+        <!-- 材质与 Dock 完全一致                  -->
+        <!-- 位置：Dock 正上方，水平居中，底边贴住 Dock 上沿 -->
+        <!-- 尺寸：目标 900 x 650，代码按屏幕自动缩放 -->
+        <!-- 动画：容器只做渲染层缩放（ScaleY 先拉长成窄柱 → ScaleX 再鼓开）， -->
+        <!--       容器位置全程不动，一个平移都没有；透明度同步渐显            -->
+        <!--       缩放原点被强行拉到"九点阵那一列"（见下面 RenderTransformOrigin） -->
+        <!-- 内容：本步留空，后续再加网格与翻页      -->
+        <!-- 共存：展板与 Dock 同时显示，互不顶替      -->
+        <!--       展板底边距窗口底边 110px，Dock 高 100px -->
+        <!--       中间留 10px，几何上永不重叠          -->
+        <!-- 层级：展板 ZIndex=1 < Dock ZIndex=10      -->
+        <!--       Dock 永远压在最上层，不会被展板遮挡   -->
+        <!--       转场期间那颗液滴也落在 Dock 玻璃下面，  -->
+        <!--       隔着通透的 Dock 看得到它从点阵里挤出来  -->
+        <!-- ================================= -->
+
+
+        <Border x:Name="LaunchBoard"
+                Width="900"
+                Height="650"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,110"
+                Panel.ZIndex="1"
+                CornerRadius="36"
+                Background="Transparent"
+                Visibility="Collapsed"
+                Opacity="0"
+                RenderTransformOrigin="0.21, 1"
+                AllowDrop="True"
+                Drop="Board_Drop"
+                DragOver="Board_DragOver"
+                PreviewMouseMove="BoardDrag_Move"
+                SizeChanged="LaunchBoard_SizeChanged">
+
+
+            <!-- ================================= -->
+            <!-- 【当前生效】WPF 原生关键帧：从九点阵那一点"原地挤出"     -->
+            <!-- 整块展板容器只在渲染层缩放：0.1 x 0.01 → 1 x 1        -->
+            <!-- TransformGroup 里已经没有平移变换，容器位置全程不动      -->
+            <!-- 缩放中心（RenderTransformOrigin）被强行挪到九点阵那一列： -->
+            <!--   X = 九点阵中心 ÷ 展板宽度（展板 800、Dock 560 时 ≈ 0.21）-->
+            <!--   Y = 1 = 展板下边缘（Dock 上沿那条线），展板从这里往上长  -->
+            <!--   运行时代码会拿现场量到的真实比例覆盖，Dock 变宽变窄都跟得上 -->
+            <!--   注：这个值是"正数"。九点阵在 Dock 左端，但它仍在展板内部；  -->
+            <!--       写成负数会把原点推到展板左边缘之外的窗口外，被窗口裁掉，  -->
+            <!--       画面上就又变回"从左下角长出来"                        -->
+            <!-- 打开（关键帧，总时长 500ms，分段缓动见下）： -->
+            <!--   拉长段 0 → 0.25s：CubicEase(EaseOut)              -->
+            <!--   鼓开段 0.25s → 0.5s：BackEase(EaseOut) 弹簧回弹     -->
+            <!--   0.0s 一个小点：ScaleX 0.1 / ScaleY 0.01，Opacity 0   -->
+            <!--        = 贴在九点阵那一列上的液体小点                   -->
+            <!--   0.25s 拉长：ScaleY 0.01 → 1（ScaleX 保持 0.1）      -->
+            <!--        = 一根从九点阵往上长出来的窄长玻璃柱，Opacity → 1  -->
+            <!--   0.5s 鼓开：ScaleX 0.1 → 1（ScaleY 保持 1）          -->
+            <!--        = 液体向左右鼓开成完整面板，位置一步都没挪         -->
+            <!-- 收起：完全反向（0 → 0.25s 横向收窄成柱，0.25s → 0.5s 缩回小点，最后淡出） -->
+            <!-- 只动最外层容器的缩放 + 内容层透明度                    -->
+            <!-- 展板内部的图标控件一个都不缩放                         -->
+            <!-- （图标悬停放大用的是它自己的 ScaleTransform）            -->
+            <!-- ================================= -->
+
+            <Border.RenderTransform>
+
+                <TransformGroup>
+
+                    <!-- 缩放：只作用于展板这一层容器 -->
+                    <!-- 不写 CenterX / CenterY：缩放中心 = 上面的锚点（九点阵那一列） -->
+
+                    <ScaleTransform x:Name="BoardScale"
+                                    ScaleX="1"
+                                    ScaleY="1"/>
+
+                </TransformGroup>
+
+            </Border.RenderTransform>
+
+
+            <Grid>
+
+                <!-- Acrylic 厚玻璃主体 -->
+
+                <Border x:Name="LaunchBoardGlassBase"
+                        CornerRadius="36"
+                        IsHitTestVisible="False">
+
+                    <Border.Background>
+
+                        <LinearGradientBrush
+                            StartPoint="0,0"
+                            EndPoint="1,1">
+
+                            <!-- 顶部透射 -->
+                            <GradientStop
+                                Color="#B8FFFFFF"
+                                Offset="0"/>
+
+                            <!-- 中间玻璃厚度 -->
+                            <GradientStop
+                                Color="#70304050"
+                                Offset="0.35"/>
+
+                            <!-- 底部深色折射 -->
+                            <GradientStop
+                                Color="#D0081018"
+                                Offset="1"/>
+
+                        </LinearGradientBrush>
+
+                    </Border.Background>
+
+                    <Border.Effect>
+
+                        <DropShadowEffect
+                            BlurRadius="45"
+                            ShadowDepth="10"
+                            Opacity="0.35"/>
+
+                    </Border.Effect>
+
+                </Border>
+
+
+                <!-- 雾面层：展板模糊度滑块控制这一层的浓度 -->
+
+                <Border x:Name="LaunchBoardGlassFog"
+                        CornerRadius="36"
+                        Background="#FFFFFFFF"
+                        Opacity="0"
+                        IsHitTestVisible="False"/>
+
+
+                <!-- 内部玻璃透射层 -->
+
+                <Border x:Name="LaunchBoardGlassFrost"
+                        CornerRadius="36"
+                        Opacity="0.45"
+                        IsHitTestVisible="False">
+
+                    <Border.Background>
+
+                        <RadialGradientBrush
+                            RadiusX="1.5"
+                            RadiusY="1.5"
+                            GradientOrigin="0.35,0.25">
+
+                            <GradientStop
+                                Color="#E8FFFFFF"
+                                Offset="0"/>
+
+                            <GradientStop
+                                Color="#70FFFFFF"
+                                Offset="0.18"/>
+
+                            <GradientStop
+                                Color="#25FFFFFF"
+                                Offset="0.55"/>
+
+                            <GradientStop
+                                Color="#00FFFFFF"
+                                Offset="1"/>
+
+                        </RadialGradientBrush>
+
+                    </Border.Background>
+
+                </Border>
+
+
+                <!-- 柔和内部阴影 -->
+
+                <Border x:Name="LaunchBoardGlassInnerShadow"
+                        CornerRadius="36"
+                        IsHitTestVisible="False">
+
+                    <Border.Background>
+
+                        <LinearGradientBrush
+                            StartPoint="0,0"
+                            EndPoint="0,1">
+
+                            <GradientStop
+                                Color="#30FFFFFF"
+                                Offset="0"/>
+
+                            <GradientStop
+                                Color="#00000000"
+                                Offset="0.45"/>
+
+                            <GradientStop
+                                Color="#70000000"
+                                Offset="1"/>
+
+                        </LinearGradientBrush>
+
+                    </Border.Background>
+
+                </Border>
+
+
+                <!-- 菲涅尔玻璃边缘 -->
+
+                <Border x:Name="LaunchBoardGlassEdge"
+                        CornerRadius="36"
+                        BorderThickness="1.5"
+                        IsHitTestVisible="False">
+
+                    <Border.BorderBrush>
+
+                        <LinearGradientBrush
+                            StartPoint="0,0"
+                            EndPoint="1,1">
+
+                            <!-- 顶部白色折射 -->
+                            <GradientStop
+                                Color="#E8FFFFFF"
+                                Offset="0"/>
+
+                            <GradientStop
+                                Color="#55B8DFFF"
+                                Offset="0.45"/>
+
+                            <GradientStop
+                                Color="#A080A8FF"
+                                Offset="1"/>
+
+                        </LinearGradientBrush>
+
+                    </Border.BorderBrush>
+
+                </Border>
+
+
+                <!-- 内部玻璃高光线 -->
+
+                <Border x:Name="LaunchBoardGlassInnerLine"
+                        CornerRadius="34"
+                        Margin="2"
+                        BorderThickness="1"
+                        IsHitTestVisible="False">
+
+                    <Border.BorderBrush>
+
+                        <LinearGradientBrush
+                            StartPoint="0,0"
+                            EndPoint="0,1">
+
+                            <GradientStop
+                                Color="#60FFFFFF"
+                                Offset="0"/>
+
+                            <GradientStop
+                                Color="#00FFFFFF"
+                                Offset="0.5"/>
+
+                            <GradientStop
+                                Color="#20FFFFFF"
+                                Offset="1"/>
+
+                        </LinearGradientBrush>
+
+                    </Border.BorderBrush>
+
+                </Border>
+                <!-- ====================================== -->
+                <!-- 展板自定义壁纸层（可选，默认隐藏）        -->
+                <!-- 位置：所有玻璃材质之上、图标 / 文字之下    -->
+                <!-- 铺法：UniformToFill，等比铺满、不留黑边    -->
+                <!-- 圆角：Border 的 CornerRadius 会把壁纸     -->
+                <!--       裁成与展板一致的 36px 圆角           -->
+                <!-- 交互：不接收鼠标，不影响拖拽 / 点击 / 滚轮  -->
+                <!-- 清除：Background 置空并把本层收起          -->
+                <!--       原有毛玻璃 / Acrylic 材质原样回来    -->
+                <!-- ====================================== -->
+
+                <!-- 壁纸层：显式 ZIndex=1（玻璃层默认 0，内容层 / 浮层 = 2） -->
+                <!-- 不能只靠声明顺序：其他层一旦设置 ZIndex 就会把壁纸压下去 -->
+                <Border x:Name="LaunchBoardWallpaper"
+                        Panel.ZIndex="1"
+                        CornerRadius="36"
+                        Background="Transparent"
+                        Opacity="0.8"
+                        Visibility="Collapsed"
+                        IsHitTestVisible="False"
+                        RenderOptions.BitmapScalingMode="HighQuality"/>
+
+
+
+
+
+                <!-- ====================================== -->
+                <!-- 展板内容层：iOS 灵动风格的应用槽位          -->
+                <!-- 布局：ItemsControl + WrapPanel          -->
+                <!-- 特意不用原生 UniformGrid（死板的文件夹感） -->
+                <!-- 槽位：80 x 80 + Margin 20，四周留出呼吸感  -->
+                <!-- 放置：整层 AllowDrop，桌面上的文件 / 文件夹直接拖进来 -->
+                <!-- 交互：左键启动 / 右键移除 / 悬停放大 1.1   -->
+                <!-- 容量：前两页，多了用小滚轮往下看           -->
+                <!-- ====================================== -->
+
+                <Grid x:Name="BoardContentLayer"
+                      Panel.ZIndex="2"
+                      Margin="56,50,56,58"
+                      Background="Transparent"
+                      AllowDrop="True"
+                      Drop="Board_Drop"
+                      DragOver="Board_DragOver">
+
+                    <!-- 垂直滚动：滚轮往下就是第二页（不做翻页动画） -->
+                    <ScrollViewer x:Name="BoardScroll"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Hidden"
+                                  Focusable="False"
+                                  PanningMode="VerticalOnly"
+                                  ScrollChanged="BoardScroll_ScrollChanged">
+
+                        <ItemsControl x:Name="BoardPanel"
+                                      HorizontalAlignment="Center"
+                                      AllowDrop="True"
+                                      Drop="Board_Drop"
+                                      DragOver="Board_DragOver"
+                                      MouseWheel="IconTip_MouseWheelDismiss">
+
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+
+                                    <Border Width="80"
+                                            Height="80"
+                                            Margin="20"
+                                            CornerRadius="24"
+                                            Background="#26FFFFFF"
+                                            BorderThickness="1"
+                                            BorderBrush="#5CFFFFFF"
+                                            RenderTransformOrigin="0.5,0.5"
+                                            AllowDrop="True"
+                                            Drop="Board_Drop"
+                                            DragOver="Board_DragOver"
+                                            MouseLeftButtonDown="BoardIcon_MouseDown"
+                                            MouseEnter="BoardIcon_MouseEnterWithTip"
+                                            MouseLeave="BoardIcon_MouseLeaveWithTip"
+                                            MouseLeftButtonUp="BoardIcon_Click"
+                                            MouseRightButtonUp="BoardIcon_Delete">
+
+                                        <!-- 悬停放大锚点：代码驱动 1.0 → 1.1 -->
+                                        <Border.RenderTransform>
+                                            <ScaleTransform ScaleX="1"
+                                                            ScaleY="1"/>
+                                        </Border.RenderTransform>
+
+                                        <!-- 柔和发光：图标不是一张干瘪的平图 -->
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="26"
+                                                              ShadowDepth="6"
+                                                              Direction="270"
+                                                              Opacity="0.34"
+                                                              Color="#050A14"/>
+                                        </Border.Effect>
+
+                                        <Grid>
+
+                                            <!-- 内侧玻璃折射 -->
+                                            <Border CornerRadius="22"
+                                                    Background="#1CFFFFFF"
+                                                    IsHitTestVisible="False"/>
+
+                                            <!-- 半透明液态玻璃高光：悬停时淡入 -->
+                                            <Border x:Name="BoardIconGlow"
+                                                    CornerRadius="22"
+                                                    Opacity="0"
+                                                    IsHitTestVisible="False">
+
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0"
+                                                                         EndPoint="0.75,1">
+
+                                                        <GradientStop Color="#85FFFFFF"
+                                                                      Offset="0"/>
+
+                                                        <GradientStop Color="#3AFFFFFF"
+                                                                      Offset="0.42"/>
+
+                                                        <GradientStop Color="#00FFFFFF"
+                                                                      Offset="1"/>
+
+                                                    </LinearGradientBrush>
+
+                                                </Border.Background>
+
+                                            </Border>
+
+                                            <!-- 应用图标：裁进 squircle，四角不发糊 -->
+                                            <Image Width="50"
+                                                   Height="50"
+                                                   Stretch="Uniform"
+                                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                                   SnapsToDevicePixels="True"
+                                                   IsHitTestVisible="False">
+
+                                                <!-- 图标统一由系统提供：exe / lnk / txt / pdf / zip / jpg / url / 文件夹 全支持 -->
+
+                                                <Image.Source>
+
+                                                    <MultiBinding Converter="{StaticResource ShellIconConverter}">
+
+                                                        <Binding Path="LaunchPath"/>
+
+                                                        <Binding Path="IconPath"/>
+
+                                                    </MultiBinding>
+
+                                                </Image.Source>
+
+                                                <Image.Clip>
+                                                    <RectangleGeometry Rect="0,0,50,50"
+                                                                       RadiusX="15"
+                                                                       RadiusY="15"/>
+                                                </Image.Clip>
+
+                                            </Image>
+                                            <!-- 批量模式：选中后的半透明遮罩 -->
+                                            <Border x:Name="BoardSelectOverlay"
+                                                    CornerRadius="24"
+                                                    Background="#4D2F7DFF"
+                                                    IsHitTestVisible="False">
+
+                                                <Border.Style>
+
+                                                    <Style TargetType="Border">
+
+                                                        <Setter Property="Visibility"
+                                                                Value="Collapsed"/>
+
+                                                        <Style.Triggers>
+
+                                                            <DataTrigger Binding="{Binding Path=(local:MainWindow.IsSelected), RelativeSource={RelativeSource AncestorType=Border}}"
+                                                                         Value="True">
+
+                                                                <Setter Property="Visibility"
+                                                                        Value="Visible"/>
+
+                                                            </DataTrigger>
+
+                                                        </Style.Triggers>
+
+                                                    </Style>
+
+                                                </Border.Style>
+
+                                            </Border>
+                                            <!-- 批量模式：右上角选择标记 -->
+                                            <!-- IsHitTestVisible=False：点击仍然落在外层 Border 上 -->
+                                            <Grid Width="22"
+                                                  Height="22"
+                                                  HorizontalAlignment="Right"
+                                                  VerticalAlignment="Top"
+                                                  Margin="0,3,3,0"
+                                                  IsHitTestVisible="False">
+
+                                                <Grid.Style>
+
+                                                    <Style TargetType="Grid">
+
+                                                        <Setter Property="Visibility"
+                                                                Value="Collapsed"/>
+
+                                                        <Style.Triggers>
+
+                                                            <DataTrigger Binding="{Binding BoardBatchMode, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                         Value="True">
+
+                                                                <Setter Property="Visibility"
+                                                                        Value="Visible"/>
+
+                                                            </DataTrigger>
+
+                                                        </Style.Triggers>
+
+                                                    </Style>
+
+                                                </Grid.Style>
+
+                                                <!-- 未选中：空心圆环 -->
+                                                <Ellipse Fill="#26FFFFFF"
+                                                         Stroke="#9AFFFFFF"
+                                                         StrokeThickness="1.2"/>
+
+                                                <!-- 已选中：蓝色实心圆 -->
+                                                <Ellipse Fill="#2F7DFF">
+
+                                                    <Ellipse.Style>
+
+                                                        <Style TargetType="Ellipse">
+
+                                                            <Setter Property="Visibility"
+                                                                    Value="Collapsed"/>
+
+                                                            <Style.Triggers>
+
+                                                                <DataTrigger Binding="{Binding Path=(local:MainWindow.IsSelected), RelativeSource={RelativeSource AncestorType=Border}}"
+                                                                             Value="True">
+
+                                                                    <Setter Property="Visibility"
+                                                                            Value="Visible"/>
+
+                                                                </DataTrigger>
+
+                                                            </Style.Triggers>
+
+                                                        </Style>
+
+                                                    </Ellipse.Style>
+
+                                                </Ellipse>
+
+                                                <!-- 已选中：白色对勾 -->
+                                                <TextBlock Text="✓"
+                                                           Foreground="White"
+                                                           FontSize="13"
+                                                           FontWeight="Bold"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Margin="0,-1,0,0">
+
+                                                    <TextBlock.Style>
+
+                                                        <Style TargetType="TextBlock">
+
+                                                            <Setter Property="Visibility"
+                                                                    Value="Collapsed"/>
+
+                                                            <Style.Triggers>
+
+                                                                <DataTrigger Binding="{Binding Path=(local:MainWindow.IsSelected), RelativeSource={RelativeSource AncestorType=Border}}"
+                                                                             Value="True">
+
+                                                                    <Setter Property="Visibility"
+                                                                            Value="Visible"/>
+
+                                                                </DataTrigger>
+
+                                                            </Style.Triggers>
+
+                                                        </Style>
+
+                                                    </TextBlock.Style>
+
+                                                </TextBlock>
+
+                                            </Grid>
+
+
+
+
+
+                                        </Grid>
+
+                                    </Border>
+
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+
+                        </ItemsControl>
+
+                    </ScrollViewer>
+
+                    <!-- 空展板引导：拖进第一个应用后自动淡出 -->
+                    <Grid x:Name="BoardEmptyHint" Visibility="Collapsed"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          IsHitTestVisible="False">
+
+                        <Rectangle Width="366"
+                                   Height="214"
+                                   RadiusX="30"
+                                   RadiusY="30"
+                                   Fill="#12FFFFFF"
+                                   Stroke="#3AFFFFFF"
+                                   StrokeThickness="2"
+                                   StrokeDashArray="6 5"/>
+
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center">
+
+                            <TextBlock Text="把桌面上的文件 / 文件夹拖到这里"
+                                       Foreground="#D9FFFFFF"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"/>
+
+                            <TextBlock Text="左键启动 · 右键移除 · 悬停放大"
+                                       Foreground="#7AFFFFFF"
+                                       FontSize="12"
+                                       Margin="0,12,0,0"
+                                       HorizontalAlignment="Center"/>
+
+                        </StackPanel>
+
+                    </Grid>
+
+                </Grid>
+
+
+                <!-- 前两页指示点：内容超过一页才亮，贴着右下角 -->
+                <StackPanel x:Name="BoardPageDots"
+                            Panel.ZIndex="2"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,26,22"
+                            Opacity="0"
+                            IsHitTestVisible="False">
+
+                    <Ellipse x:Name="BoardPageDot1"
+                             Width="6"
+                             Height="6"
+                             Margin="0,0,7,0"
+                             Fill="White"
+                             Opacity="0.32"/>
+
+                    <Ellipse x:Name="BoardPageDot2"
+                             Width="6"
+                             Height="6"
+                             Fill="White"
+                             Opacity="0.32"/>
+
+                </StackPanel>
+
+
+                <!-- 一句话反馈：淡入 → 停留 → 自动淡出（不用定时器） -->
+                <TextBlock x:Name="BoardStatus"
+                           Panel.ZIndex="2"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Bottom"
+                           Margin="0,0,0,18"
+                           Foreground="#E6FFFFFF"
+                           FontSize="13"
+                           Opacity="0"
+                           IsHitTestVisible="False"/>
+
+                <!-- 展板右上角：批量管理开关 -->
+                <!-- 普通模式显示“管理”，批量模式显示“完成” -->
+                <Button x:Name="BoardManageButton"
+                        Panel.ZIndex="2"
+                        Content="管理"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Margin="0,18,24,0"
+                        Style="{StaticResource BoardBatchButtonStyle}"
+                        Click="BoardManageButton_Click"/>
+
+
+                <!-- 批量操作栏：进入管理模式才出现 -->
+                <Border x:Name="BoardBatchBar"
+                        Panel.ZIndex="2"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,0,14"
+                        Padding="8,6"
+                        CornerRadius="24"
+                        Background="#CC0C141E"
+                        BorderBrush="#40FFFFFF"
+                        BorderThickness="1"
+                        Visibility="Collapsed"
+                        Opacity="0">
+
+                    <StackPanel Orientation="Horizontal">
+
+                        <Button x:Name="BoardSelectAllButton"
+                                Content="全选"
+                                Margin="0,0,7,0"
+                                Style="{StaticResource BoardBatchButtonStyle}"
+                                Click="BoardSelectAllButton_Click"/>
+
+                        <Button x:Name="BoardSelectNoneButton"
+                                Content="取消全选"
+                                Margin="0,0,7,0"
+                                Style="{StaticResource BoardBatchButtonStyle}"
+                                Click="BoardSelectNoneButton_Click"/>
+
+                        <Button x:Name="BoardDeleteSelectedButton"
+                                Content="删除选中"
+                                Background="#3DFF5A5A"
+                                Style="{StaticResource BoardBatchButtonStyle}"
+                                Click="BoardDeleteSelectedButton_Click"/>
+
+                    </StackPanel>
+
+                </Border>
+
+
+            </Grid>
+
+        </Border>
+
+
+
+
+        <!-- ================================= -->
+        <!-- 渲染缓存 CacheMode=BitmapCache      -->
+        <!-- 空闲时把整块 DockBody 画成一张位图，省重绘 -->
+        <!-- 但展开过渡期间（尺寸每帧都在变）必须临时摘掉：-->
+        <!-- 缓存每帧重画反而拖慢「新一帧」的推送，      -->
+        <!-- 而且旧缓存位图会被系统当成残影贴出来（含 Logo）-->
+        <!-- 摘掉与装回分别在 MainWindow.xaml.cs 的       -->
+        <!-- PrepareCollapseLogoForExpand() /            -->
+        <!-- Collapse_Completed() 里                     -->
+        <!-- ================================= -->
+
+        <Border x:Name="DockBody"
+
+                Width="560"
+
+                Height="100"
+
+                VerticalAlignment="Bottom"
+
+                CornerRadius="50"
+
+                ClipToBounds="True"
+
+                Background="Transparent"
+
+                CacheMode="BitmapCache"
+
+                Panel.ZIndex="10"
+
+                UseLayoutRounding="True"
+
+                SnapsToDevicePixels="True"
+
+                RenderTransformOrigin="0.5,1"
+
+                MouseLeftButtonDown="Dock_MouseDown"
+
+                MouseMove="Dock_MouseMove">
+
+
+
+
+
+
+            <Border.RenderTransform>
+
+
+                <TranslateTransform x:Name="DockTransform"
+
+                                    Y="0"/>
+
+
+            </Border.RenderTransform>
+            <!-- ================================= -->
+            <!-- 圆角裁剪：ClipToBounds 只按矩形裁          -->
+            <!-- 玻璃层的投影(DropShadow)会漏进矩形四角      -->
+            <!-- 表现就是圆角胶囊外面套了一圈灰色直角框      -->
+            <!-- 这里改成随尺寸同步的圆角矩形裁剪（Clip）     -->
+            <!-- 半径 = 高度 / 2，与 CornerRadius 完全一致  -->
+            <!-- 由 MainWindow.xaml.cs 的 UpdateDockClip()  -->
+            <!-- 在 DockBody 每次尺寸变化时同步             -->
+            <!-- 展开 / 收敛 / 正圆 三种状态都贴得住        -->
+            <!-- ================================= -->
+
+
+            <Border.Clip>
+
+                <RectangleGeometry x:Name="DockClip"
+                                   Rect="0,0,560,100"
+                                   RadiusX="50"
+                                   RadiusY="50"/>
+
+            </Border.Clip>
+
+
+
+            <!-- ================================= -->
+            <!-- 右键菜单已移除                         -->
+            <!-- 原来的“锁定位置 / 解锁位置”两项         -->
+            <!-- 已移入设置面板里的半透明开关            -->
+            <!-- （DockSettingsPanel 里的 LockToggle）   -->
+            <!-- 开关 ↔ isLocked 双向同步，拨动立即生效  -->
+            <!-- 图标右键删除等原有行为完全不受影响       -->
+            <!-- ================================= -->
+
+
+
+
+
+
+
+
+
+            <Grid>
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- Acrylic 厚玻璃主体 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassBase"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.Background>
+
+
+                        <LinearGradientBrush
+
+                            StartPoint="0,0"
+
+                            EndPoint="1,1">
+
+
+
+
+
+                            <!-- 顶部透射 -->
+
+                            <GradientStop
+
+                                Color="#B8FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <!-- 中间玻璃厚度 -->
+
+                            <GradientStop
+
+                                Color="#70304050"
+
+                                Offset="0.35"/>
+
+
+
+
+
+
+
+                            <!-- 底部深色折射 -->
+
+                            <GradientStop
+
+                                Color="#D0081018"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </LinearGradientBrush>
+
+
+                    </Border.Background>
+
+
+
+
+
+
+
+
+                    <Border.Effect>
+
+
+                        <DropShadowEffect
+
+                            BlurRadius="45"
+
+                            ShadowDepth="10"
+
+                            Opacity="0.35"/>
+
+
+                    </Border.Effect>
+
+
+
+
+
+                </Border>
+
+
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- 壁纸色调层：跟随壁纸主色（默认不显示） -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassTint"
+
+                        Opacity="0"
+
+                        IsHitTestVisible="False">
+
+                    <Border.Background>
+
+
+                        <SolidColorBrush
+
+                            x:Name="DockGlassTintBrush"
+
+                            Color="#FFFFFFFF"/>
+
+
+                    </Border.Background>
+
+
+                </Border>
+
+
+
+                <!-- ================================= -->
+                <!-- 雾面层：模糊滑块控制这一层的浓度     -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassFog"
+
+                        Background="#FFFFFFFF"
+
+                        Opacity="0"
+
+                        IsHitTestVisible="False"/>
+
+
+
+                <!-- ================================= -->
+                <!-- 内部玻璃透射层 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassFrost"
+
+                        Opacity="0.45"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.Background>
+
+
+                        <RadialGradientBrush x:Name="GlassBrush"
+
+                                             RadiusX="1.5"
+
+                                             RadiusY="1.5"
+
+                                             GradientOrigin="0.35,0.25">
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#E8FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#70FFFFFF"
+
+                                Offset="0.18"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#25FFFFFF"
+
+                                Offset="0.55"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#00FFFFFF"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </RadialGradientBrush>
+
+
+                    </Border.Background>
+
+
+
+                </Border>
+
+
+
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- 柔和内部阴影 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassInnerShadow"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.Background>
+
+
+                        <LinearGradientBrush
+
+                            StartPoint="0,0"
+
+                            EndPoint="0,1">
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#30FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#00000000"
+
+                                Offset="0.45"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#70000000"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </LinearGradientBrush>
+
+
+                    </Border.Background>
+
+
+
+                </Border>
+                                <!-- ================================= -->
+                <!-- 动态流动高光层 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassSweep"
+
+                        Opacity="0.38"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.Background>
+
+
+                        <LinearGradientBrush x:Name="LightSweep"
+
+                                             StartPoint="-1,0"
+
+                                             EndPoint="0,1">
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#00FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#B0FFFFFF"
+
+                                Offset="0.45"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#00FFFFFF"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </LinearGradientBrush>
+
+
+                    </Border.Background>
+
+
+
+                </Border>
+
+
+
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- 液态折射波纹层 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassRipple"
+
+                        Opacity="0.18"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.Background>
+
+
+                        <RadialGradientBrush
+
+                            RadiusX="1.2"
+
+                            RadiusY="1.2"
+
+                            GradientOrigin="0.7,0.3">
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#80FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#30A8D8FF"
+
+                                Offset="0.3"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#00FFFFFF"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </RadialGradientBrush>
+
+
+                    </Border.Background>
+
+
+
+                </Border>
+
+
+
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- 菲涅尔玻璃边缘 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassEdge"
+
+                        BorderThickness="1.5"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.BorderBrush>
+
+
+                        <LinearGradientBrush
+
+                            StartPoint="0,0"
+
+                            EndPoint="1,1">
+
+
+
+
+
+                            <!-- 顶部白色折射 -->
+
+                            <GradientStop
+
+                                Color="#E8FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <!-- 中间透明 -->
+
+                            <GradientStop
+
+                                Color="#55B8DFFF"
+
+                                Offset="0.45"/>
+
+
+
+
+
+
+
+                            <!-- 底部蓝紫折射 -->
+
+                            <GradientStop
+
+                                Color="#A080A8FF"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </LinearGradientBrush>
+
+
+                    </Border.BorderBrush>
+
+
+
+                </Border>
+
+
+
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- 内部玻璃高光线 -->
+                <!-- ================================= -->
+
+
+
+                <Border CornerRadius="50"
+
+                        x:Name="DockGlassInnerLine"
+
+                        Margin="2"
+
+                        BorderThickness="1"
+
+                        IsHitTestVisible="False">
+
+
+
+
+
+                    <Border.BorderBrush>
+
+
+                        <LinearGradientBrush
+
+                            StartPoint="0,0"
+
+                            EndPoint="0,1">
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#60FFFFFF"
+
+                                Offset="0"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#00FFFFFF"
+
+                                Offset="0.5"/>
+
+
+
+
+
+
+
+                            <GradientStop
+
+                                Color="#20FFFFFF"
+
+                                Offset="1"/>
+
+
+
+
+
+                        </LinearGradientBrush>
+
+
+                    </Border.BorderBrush>
+
+
+
+                </Border>
+
+
+
+
+
+
+
+
+
+                <!-- ================================= -->
+                <!-- 材质预设：极简纯色底（默认熄灭）      -->
+                <!-- 只盖住玻璃层，图标 / 拖拽仍在更上层    -->
+                <!-- 由 ApplyDockMaterialCore 控制 Opacity -->
+                <!-- ================================= -->
+
+                <Border CornerRadius="50"
+                        x:Name="DockMinimalFill"
+                        Background="#CC1A1A1E"
+                        Opacity="0"
+                        IsHitTestVisible="False"/>
+
+                <Border CornerRadius="50"
+                        x:Name="DockMinimalBorder"
+                        BorderThickness="1"
+                        BorderBrush="#40FFFFFF"
+                        Opacity="0"
+                        IsHitTestVisible="False"/>
+
+                <!-- ================================= -->
+                <!-- 材质预设：高光质感斜向反光层          -->
+                <!-- 左上白 → 中段透明 → 右下微弱回光      -->
+                <!-- 只在 Glossy 预设下淡入，不参与命中    -->
+                <!-- ================================= -->
+
+                <Border CornerRadius="50"
+                        x:Name="DockGlassHighlight"
+                        Opacity="0"
+                        IsHitTestVisible="False">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0"
+                                             EndPoint="1,1">
+                            <GradientStop Color="#66FFFFFF" Offset="0"/>
+                            <GradientStop Color="#22FFFFFF" Offset="0.28"/>
+                            <GradientStop Color="#00FFFFFF" Offset="0.55"/>
+                            <GradientStop Color="#14FFFFFF" Offset="0.78"/>
+                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <!-- ================================= -->
+                <!-- 顶部拖动区域 -->
+                <!-- ================================= -->
+
+
+
+                <Border x:Name="DragArea"
+
+                        Height="20"
+
+                        VerticalAlignment="Top"
+
+                        Background="Transparent"
+
+                        MouseMove="Dock_Move"/>
+                <!-- ================================= -->
+                <!-- 图标区域 -->
+                <!-- ================================= -->
+
+
+
+                <ItemsControl x:Name="IconPanel"
+
+                              HorizontalAlignment="Center"
+
+                              VerticalAlignment="Center"
+
+                              AllowDrop="True"
+
+                              Drop="Dock_Drop"
+
+                              DragOver="Dock_DragOver">
+
+
+
+
+
+
+                    <ItemsControl.ItemsPanel>
+
+
+                        <ItemsPanelTemplate>
+
+
+                            <StackPanel Orientation="Horizontal"/>
+
+
+                        </ItemsPanelTemplate>
+
+
+                    </ItemsControl.ItemsPanel>
+
+
+
+
+
+
+
+                    <ItemsControl.ItemTemplate>
+
+
+                        <DataTemplate>
+
+
+
+
+
+                            <Border
+
+                                Width="62"
+
+                                Height="62"
+
+                                Margin="9"
+
+                                CornerRadius="20"
+
+                                Background="#45FFFFFF"
+
+                                BorderThickness="1"
+
+                                BorderBrush="#90FFFFFF"
+
+                                RenderTransformOrigin="0.5,0.5"
+
+
+                                MouseLeftButtonUp="Icon_Click"
+
+                                MouseRightButtonUp="Icon_Delete"
+
+                                MouseEnter="Icon_MouseEnterWithTip"
+
+                                MouseLeave="Icon_MouseLeaveWithTip">
+
+
+
+
+
+
+                                <Border.RenderTransform>
+
+
+                                    <ScaleTransform
+
+                                        ScaleX="1"
+
+                                        ScaleY="1"/>
+
+
+                                </Border.RenderTransform>
+
+
+
+
+
+
+
+                                <Border.Effect>
+
+
+                                    <DropShadowEffect
+
+                                        BlurRadius="18"
+
+                                        ShadowDepth="4"
+
+                                        Opacity="0.22"/>
+
+
+                                </Border.Effect>
+
+
+
+
+
+
+                                <Grid>
+
+
+
+
+
+                                    <!-- 图标内部玻璃反射 -->
+
+
+                                    <Border
+
+                                        CornerRadius="18"
+
+                                        Background="#25FFFFFF"
+
+                                        IsHitTestVisible="False"/>
+
+
+
+
+
+
+
+                                    <Image
+
+                                        Width="46"
+
+                                        Height="46"
+
+                                        Stretch="Uniform"
+
+                                        RenderOptions.BitmapScalingMode="HighQuality"
+
+                                        SnapsToDevicePixels="True"
+
+                                        IsHitTestVisible="False">
+
+                                        <!-- 图标统一由系统提供：展板里的文件 / 文件夹都能拿到关联图标 -->
+
+                                        <Image.Source>
+
+                                            <MultiBinding Converter="{StaticResource ShellIconConverter}">
+
+                                                <Binding Path="LaunchPath"/>
+
+                                                <Binding Path="IconPath"/>
+
+                                            </MultiBinding>
+
+                                        </Image.Source>
+
+                                    </Image>
+
+
+
+
+
+                                </Grid>
+
+
+
+
+
+                            </Border>
+
+
+
+
+
+                        </DataTemplate>
+
+
+
+
+
+                    </ItemsControl.ItemTemplate>
+
+
+
+
+
+
+                </ItemsControl>
+
+
+                <!-- ================================= -->
+                <!-- 九点点阵：启动板按钮                  -->
+                <!-- 位置：Dock 最左侧                     -->
+                <!-- 点击：打开 / 关闭上方大展板            -->
+                <!-- 按住：沿用 Dock 的全局拖动             -->
+                <!-- ================================= -->
+
+
+                <Border x:Name="LaunchButton"
+                        Width="62"
+                        Height="62"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Margin="18,0,0,0"
+                        CornerRadius="20"
+                        Background="#45FFFFFF"
+                        BorderThickness="1"
+                        BorderBrush="#90FFFFFF"
+                        Cursor="Hand"
+                        RenderTransformOrigin="0.5,0.5"
+                        MouseLeftButtonDown="LaunchButton_MouseDown"
+                        MouseLeftButtonUp="LaunchButton_Click"
+                        MouseEnter="LaunchButton_MouseEnter"
+                        MouseLeave="LaunchButton_MouseLeave">
+
+                    <Border.RenderTransform>
+
+                        <ScaleTransform x:Name="LaunchButtonScale"
+                                        ScaleX="1"
+                                        ScaleY="1"/>
+
+                    </Border.RenderTransform>
+
+                    <Border.Effect>
+
+                        <DropShadowEffect
+                            BlurRadius="18"
+                            ShadowDepth="4"
+                            Opacity="0.22"/>
+
+                    </Border.Effect>
+
+                    <Grid>
+
+                        <!-- 图标内部玻璃反射 -->
+
+                        <Border
+                            CornerRadius="18"
+                            Background="#25FFFFFF"
+                            IsHitTestVisible="False"/>
+
+                        <!-- 3 x 3 点阵：每格 10，点直径 4 -->
+
+                        <UniformGrid x:Name="LaunchDots"
+                                     Rows="3"
+                                     Columns="3"
+                                     Width="30"
+                                     Height="30"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Opacity="0.92"
+                                     IsHitTestVisible="False">
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                            <Ellipse Width="4" Height="4" Fill="White"/>
+
+                        </UniformGrid>
+
+                    </Grid>
+
+                </Border>
+
+
+
+
+                <!-- ================================= -->
+                <!-- 收起按钮：iOS 风格左向小箭头        -->
+                <!-- 半透明 · 圆头线条 · 点击收起        -->
+                <!-- ================================= -->
+
+
+                <!-- ================================= -->
+                <!-- 设置按钮：半透明小齿轮               -->
+                <!-- 位置：收起箭头左侧                    -->
+                <!-- 【本次改动】齿轮已停用：设置入口搬到系统托盘菜单   -->
+                <!-- 右键托盘图标 →「AeroDock设置中心」（独立窗口）    -->
+                <!-- 元素本身必须保留：挤出动画要读它的位置            -->
+                <!-- 但已 Opacity=0 + IsHitTestVisible=False          -->
+                <!-- 看不见也点不到，下面 4 个鼠标事件已全部摘掉        -->
+                <!-- 悬停：放大 + 提亮 · 点击：材质面板（已下线）        -->
+                <!-- ================================= -->
+
+
+
+                <Border x:Name="SettingsButton"
+
+                        Width="28"
+
+                        Height="28"
+
+                        HorizontalAlignment="Right"
+
+                        VerticalAlignment="Center"
+
+                        Margin="0,0,48,0"
+
+                        Background="Transparent"
+
+                        Cursor="Hand"
+
+                        RenderTransformOrigin="0.5,0.5"
+
+                        Opacity="0"
+
+                        IsHitTestVisible="False"
+
+                        Focusable="False"
+
+                        ToolTipService.IsEnabled="False">
+
+
+                    <Border.RenderTransform>
+
+
+                        <ScaleTransform
+
+                            x:Name="SettingsButtonScale"
+
+                            ScaleX="1"
+
+                            ScaleY="1"/>
+
+
+                    </Border.RenderTransform>
+
+
+                    <Grid>
+
+
+                        <Grid x:Name="SettingsGearGroup"
+
+                              Opacity="0.55"
+
+                              IsHitTestVisible="False">
+
+
+                            <!-- 齿轮轮廓：32 点折线齿轮（不用圆弧，渲染最稳） -->
+
+
+                            <Path
+
+                                Width="17"
+
+                                Height="17"
+
+                                HorizontalAlignment="Center"
+
+                                VerticalAlignment="Center"
+
+                                Stretch="Uniform"
+
+                                Stroke="White"
+
+                                StrokeThickness="2"
+
+                                StrokeLineJoin="Round"
+
+                                Data="M 18.73,10.07 L 21.28,10.53 L 21.28,13.47 L 18.73,13.93 L 18.12,15.39 L 19.60,17.53 L 17.53,19.60 L 15.39,18.12 L 13.93,18.73 L 13.47,21.28 L 10.53,21.28 L 10.07,18.73 L 8.61,18.12 L 6.47,19.60 L 4.40,17.53 L 5.88,15.39 L 5.27,13.93 L 2.72,13.47 L 2.72,10.53 L 5.27,10.07 L 5.88,8.61 L 4.40,6.47 L 6.47,4.40 L 8.61,5.88 L 10.07,5.27 L 10.53,2.72 L 13.47,2.72 L 13.93,5.27 L 15.39,5.88 L 17.53,4.40 L 19.60,6.47 L 18.12,8.61 Z"/>
+
+
+                            <!-- 齿轮中心孔 -->
+
+
+                            <Ellipse
+
+                                Width="5"
+
+                                Height="5"
+
+                                HorizontalAlignment="Center"
+
+                                VerticalAlignment="Center"
+
+                                Stroke="White"
+
+                                StrokeThickness="1.6"/>
+
+
+                        </Grid>
+
+
+                    </Grid>
+
+
+                </Border>
+
+
+
+                <Border x:Name="CollapseButton"
+
+                        Width="30"
+
+                        Height="30"
+
+                        HorizontalAlignment="Right"
+
+                        VerticalAlignment="Center"
+
+                        Margin="0,0,7,0"
+
+                        Background="Transparent"
+
+                        Cursor="Hand"
+
+                        MouseLeftButtonDown="CollapseButton_MouseDown"
+
+                        MouseLeftButtonUp="CollapseButton_Click"
+
+                        MouseEnter="CollapseButton_MouseEnter"
+
+                        MouseLeave="CollapseButton_MouseLeave">
+
+
+                    <Path x:Name="CollapseArrow"
+
+                          Width="11"
+
+                          Height="19"
+
+                          HorizontalAlignment="Center"
+
+                          VerticalAlignment="Center"
+
+                          Stretch="Uniform"
+
+                          Stroke="White"
+
+                          StrokeThickness="2.6"
+
+                          StrokeStartLineCap="Round"
+
+                          StrokeEndLineCap="Round"
+
+                          StrokeLineJoin="Round"
+
+                          Opacity="0.55"
+
+                          IsHitTestVisible="False"
+
+                          Data="M 10,1 L 1,10 L 10,19"/>
+
+
+                </Border>
+
+
+
+
+                <!-- ================================= -->
+                <!-- 收起后的小 Logo                     -->
+                <!-- 图标：Lucide webhook (24x24 描边)    -->
+                <!-- 换图标：在 Canvas 里加减 Path 即可   -->
+                <!-- 双击还原展开                        -->
+                <!-- ================================= -->
+
+
+                <Border x:Name="CollapseLogo"
+
+                        Width="64"
+
+                        Height="64"
+
+                        UseLayoutRounding="True"
+
+                        SnapsToDevicePixels="False"
+
+                        HorizontalAlignment="Center"
+
+                        VerticalAlignment="Center"
+
+                        Background="Transparent"
+
+                        Cursor="Hand"
+
+                        Visibility="Collapsed"
+
+                        Opacity="0"
+
+                        RenderTransformOrigin="0.5,0.5"
+
+                        MouseLeftButtonDown="CollapseLogo_MouseDown">
+
+
+                    <!-- ================================= -->
+                    <!-- 圆里 Logo 缓慢自转（只在收起状态转）   -->
+                    <!-- 只动 RotateTransform.Angle 一个属性   -->
+                    <!-- 纯渲染层变换：不触发布局、不重算尺寸   -->
+                    <!-- 锚点 0.5,0.5 = 绕自身中心转            -->
+                    <!-- 图标几何中心已在 Canvas 内校正到正中    -->
+                    <!-- （下面的 TranslateTransform Y=-1.245） -->
+                    <!-- 换图标仍然只改 Canvas 里的 Path        -->
+                    <!-- 不参与任何命中测试，双击展开照常       -->
+                    <!-- 该图标全程都在转：旋转子树关掉像素吸附  -->
+                    <!-- （本 Border 与内部 Viewbox 的          -->
+                    <!--   SnapsToDevicePixels=False）          -->
+                    <!-- 否则每帧重新吸附会带来约 1px 的微抖    -->
+                    <!-- ================================= -->
+
+
+                    <Border.RenderTransform>
+
+                        <TransformGroup>
+
+                            <!-- ============================= -->
+                            <!-- 自转：绕自身中心（RenderTransformOrigin 0.5,0.5） -->
+                            <!-- 必须放在组里第一位：先转，再做渲染层位移 -->
+                            <!-- 否则平移量会被旋转带着走，Logo 会绕圈晃 -->
+                            <!-- 名称与调用方式一个都没改 -->
+                            <!-- StartLogoSpin / StopLogoSpin 照旧驱动它 -->
+                            <!-- ============================= -->
+
+                            <RotateTransform x:Name="CollapseLogoRotate"
+                                             Angle="0"/>
+
+
+
+                            <!-- ============================= -->
+                            <!-- 展开瞬间的锚定位移（新增，其它用途一律不用） -->
+                            <!-- 收缩状态下的基准坐标 = 无位移 = (0,0) -->
+                            <!-- 展开前由 AnchorCollapseLogoForExpand() 写回 0 -->
+                            <!-- 给 Logo 一个「渲染层起始坐标」的落脚点 -->
+                            <!-- 即使有残留动画 / 微跳，也能一帧压回原位 -->
+                            <!-- 放在组里最后一位：只做纯位移，不参与旋转 -->
+                            <!-- 纯渲染层变换：不改尺寸、不触发布局、不碰命中测试 -->
+                            <!-- ============================= -->
+
+                            <TranslateTransform x:Name="CollapseLogoTranslate"
+                                                X="0"
+                                                Y="0"/>
+
+                        </TransformGroup>
+
+                    </Border.RenderTransform>
+
+
+
+
+
+                    <!-- Lucide "webhook" 图标        -->
+                    <!-- 24x24 描边式，stroke-width 2  -->
+                    <!-- 三段路径放到同一个 Canvas 里  -->
+                    <!-- 共用一个坐标系，不能各自拉伸  -->
+                    <!-- 否则每段都会被单独拉变形      -->
+
+                    <!-- 尺寸：整块图标等比放大到外圈 64 -->
+                    <!-- 24x24 坐标系与三段 Path 完全没动 -->
+                    <!-- 换图标仍然只在 Canvas 里加减 Path  -->
+
+                    <Viewbox Stretch="Uniform"
+
+                             HorizontalAlignment="Center"
+
+                             VerticalAlignment="Center"
+
+                             SnapsToDevicePixels="False">
+
+                    <Canvas Width="24"
+
+                            Height="24"
+
+                            HorizontalAlignment="Center"
+
+                            VerticalAlignment="Center"
+
+                            Opacity="0.95">
+
+
+                        <!-- ================================= -->
+                        <!-- 居中校正：Logo 能绕正中心自转的前提       -->
+                        <!-- 关键是让「视觉重心」压在转轴 (12,12) 上   -->
+                        <!-- webhook 三段墨迹（含 2 号描边）实测：     -->
+                        <!-- 包围盒 x 1.0~23.0, y 1.0~22.0           -->
+                        <!-- 包围盒中心 = (12.0, 11.5)               -->
+                        <!-- 墨迹质心 = (11.95, 13.25)               -->
+                        <!-- 质心比包围盒中心低 1.25 格               -->
+                        <!-- 旧值 Y=0.5 只对齐包围盒中心             -->
+                        <!-- 质心仍偏离转轴约 4.7px（64px 下）        -->
+                        <!-- 整块图标就会绕着小圈“晃”                 -->
+                        <!-- 这里整体上移 1.245 格，让质心落在轴上     -->
+                        <!-- 故 Y = -1.245                           -->
+                        <!-- （质心 y 13.245 减画布中心 12）          -->
+                        <!-- X 实测 11.95，偏差可忽略，保持 0         -->
+                        <!-- 转一圈质心离轴 ≤0.8px（此前 5.3px）      -->
+                        <!-- 纯渲染层位移：Canvas 尺寸不变            -->
+                        <!-- Viewbox 缩放比例与图标大小完全不受影响    -->
+                        <!-- ================================= -->
+
+
+                        <Canvas.RenderTransform>
+
+                            <TranslateTransform X="0"
+                                                Y="-1.245"/>
+
+                        </Canvas.RenderTransform>
+
+
+
+
+
+                        <Path Width="24"
+
+                              Height="24"
+
+                              Stretch="None"
+
+                              Fill="{x:Null}"
+
+                              Stroke="White"
+
+                              StrokeThickness="2"
+
+                              StrokeStartLineCap="Round"
+
+                              StrokeEndLineCap="Round"
+
+                              StrokeLineJoin="Round"
+
+                              Data="M 18,16.98 h -5.99 c -1.1,0 -1.95,0.94 -2.48,1.9 A 4,4 0 0 1 2,17 c 0.01,-0.7 0.2,-1.4 0.57,-2"/>
+
+
+                        <Path Width="24"
+
+                              Height="24"
+
+                              Stretch="None"
+
+                              Fill="{x:Null}"
+
+                              Stroke="White"
+
+                              StrokeThickness="2"
+
+                              StrokeStartLineCap="Round"
+
+                              StrokeEndLineCap="Round"
+
+                              StrokeLineJoin="Round"
+
+                              Data="M 6,17 l 3.13,-5.78 c 0.53,-0.97 0.1,-2.18 -0.5,-3.1 a 4,4 0 1 1 6.89,-4.06"/>
+
+
+                        <Path Width="24"
+
+                              Height="24"
+
+                              Stretch="None"
+
+                              Fill="{x:Null}"
+
+                              Stroke="White"
+
+                              StrokeThickness="2"
+
+                              StrokeStartLineCap="Round"
+
+                              StrokeEndLineCap="Round"
+
+                              StrokeLineJoin="Round"
+
+                              Data="M 12,6 l 3.13,5.73 C 15.66,12.7 16.9,13 18,13 a 4,4 0 0 1 0,8"/>
+
+
+                    </Canvas>
+
+                    </Viewbox>
+
+
+                </Border>
+
+
+
+
+
+            </Grid>
+
+
+
+        </Border>
+        <!-- ================================= -->
+        <!-- 拖拽视觉层：跟手的幽灵图标          -->
+        <!-- 以及被挤出 Dock 时飞回展板的图标    -->
+        <!-- 位置：RootGrid 最后一个子元素      -->
+        <!-- 层级：ZIndex=200，压过 Dock 的 10  -->
+        <!-- 命中：IsHitTestVisible=False      -->
+        <!--       鼠标事件照常落到 Dock / 展板 -->
+        <!-- 说明：只做视觉，不参与任何业务逻辑  -->
+        <!-- ================================= -->
+
+
+        <Canvas x:Name="DragOverlay"
+
+                Panel.ZIndex="200"
+
+                IsHitTestVisible="False"/>
+
+
+
+
+
+
+
+
+        <!-- ================================= -->
+        <!-- 设置面板：Dock 材质调节               -->
+        <!-- 与主 Dock 同一套玻璃材质和圆角风格     -->
+        <!-- 位置：Dock 正上方                     -->
+        <!-- 打开：从底边弹出 + 淡入                -->
+        <!-- ================================= -->
+
+
+        <!-- 面板高度 176：竖排放得下三行控件        -->
+        <!-- 壁纸取色 / 位置锁定 / 开机自启动        -->
+        <!-- 底部再加一整行：桌面图标处理模式        -->
+        <!-- （原来是两行 92，窗口高度同步加高到 284） -->
+
+        <Border x:Name="DockSettingsPanel"
+                Width="470"
+                Height="176"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,104"
+                Panel.ZIndex="2"
+                CornerRadius="36"
+                Background="Transparent"
+                Visibility="Collapsed"
+                Opacity="0"
+                RenderTransformOrigin="0.5,1">
+
+            <Border.RenderTransform>
+
+                <ScaleTransform x:Name="DockSettingsScale"
+                                ScaleX="1"
+                                ScaleY="0.9"/>
+
+            </Border.RenderTransform>
+
+            <Border.Resources>
+
+                <!-- 面板专用滑块：细轨道 + 白色圆形滑块 -->
+
+                <Style x:Key="GlassSliderStyle" TargetType="Slider">
+                    <Setter Property="Height" Value="30"/>
+                    <Setter Property="VerticalAlignment" Value="Center"/>
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Slider">
+                                <Grid Background="Transparent">
+                                    <Border Height="6" CornerRadius="3" Background="#33FFFFFF" BorderThickness="1" BorderBrush="#40FFFFFF" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    <Track x:Name="PART_Track" Orientation="Horizontal">
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="Slider.DecreaseLarge" Opacity="0" Background="Transparent" BorderThickness="0" Focusable="False"/>
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="Slider.IncreaseLarge" Opacity="0" Background="Transparent" BorderThickness="0" Focusable="False"/>
+                                        </Track.IncreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb Width="16" Height="16">
+                                                <Thumb.Template>
+                                                    <ControlTemplate TargetType="Thumb">
+                                                        <Grid>
+                                                            <Ellipse Fill="#F2FFFFFF"/>
+                                                            <Ellipse Margin="2" Stroke="#66FFFFFF" StrokeThickness="1"/>
+                                                        </Grid>
+                                                    </ControlTemplate>
+                                                </Thumb.Template>
+                                            </Thumb>
+                                        </Track.Thumb>
+                                    </Track>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+
+
+                <!-- 面板专用开关：半透明玻璃胶囊 ToggleSwitch -->
+                <!-- 用 CheckBox + 定制模板实现，不引入任何库 -->
+                <!-- 勾选：滑块滑到右侧并点亮               -->
+                <!-- 不勾选：滑块回到左侧，恢复原始半透明     -->
+
+                <Style x:Key="GlassToggleSwitchStyle" TargetType="CheckBox">
+                    <Setter Property="Width" Value="38"/>
+                    <Setter Property="Height" Value="20"/>
+                    <Setter Property="Cursor" Value="Hand"/>
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="CheckBox">
+                                <Grid Background="Transparent">
+                                    <Border x:Name="SwitchTrack"
+                                            CornerRadius="10"
+                                            Background="#38FFFFFF"
+                                            BorderThickness="1"
+                                            BorderBrush="#66FFFFFF"/>
+                                    <Ellipse x:Name="SwitchKnob"
+                                             Width="14"
+                                             Height="14"
+                                             Margin="3,0,0,0"
+                                             HorizontalAlignment="Left"
+                                             VerticalAlignment="Center"
+                                             Fill="#CCFFFFFF"/>
+                                </Grid>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter TargetName="SwitchTrack" Property="Background" Value="#78B0DCFF"/>
+                                        <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="#B0FFFFFF"/>
+                                        <Setter TargetName="SwitchKnob" Property="HorizontalAlignment" Value="Right"/>
+                                        <Setter TargetName="SwitchKnob" Property="Margin" Value="0,0,3,0"/>
+                                        <Setter TargetName="SwitchKnob" Property="Fill" Value="#FFFFFFFF"/>
+                                    </Trigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="#E0FFFFFF"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+
+                <!-- ================================= -->
+                <!-- 面板专用药丸：模式二选一               -->
+                <!-- 材质与上面 GlassToggleSwitchStyle 同一套 -->
+                <!-- 选中 = 蓝色玻璃，未选 = 白色半透明      -->
+                <!-- 代码侧：IconModeKeep_Checked /         -->
+                <!--         IconModeStore_Checked          -->
+                <!-- ================================= -->
+
+                <Style x:Key="GlassRadioPillStyle" TargetType="RadioButton">
+                    <Setter Property="Height" Value="28"/>
+                    <Setter Property="Cursor" Value="Hand"/>
+                    <Setter Property="FontSize" Value="11.5"/>
+                    <Setter Property="Foreground" Value="#F0FFFFFF"/>
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="RadioButton">
+                                <Border x:Name="PillTrack"
+                                        CornerRadius="14"
+                                        Background="#38FFFFFF"
+                                        BorderThickness="1"
+                                        BorderBrush="#66FFFFFF">
+                                    <ContentPresenter Margin="12,0,12,0"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      ContentSource="Content"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter TargetName="PillTrack" Property="Background" Value="#78B0DCFF"/>
+                                        <Setter TargetName="PillTrack" Property="BorderBrush" Value="#B0FFFFFF"/>
+                                    </Trigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="PillTrack" Property="BorderBrush" Value="#E0FFFFFF"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+
+            </Border.Resources>
+
+            <Grid>
+
+                <!-- 面板：玻璃材质层（与 Dock 同款三明治结构） -->
+
+                <Border CornerRadius="36"
+                        IsHitTestVisible="False">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#B8FFFFFF" Offset="0"/>
+                            <GradientStop Color="#70304050" Offset="0.35"/>
+                            <GradientStop Color="#D0081018" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="26" ShadowDepth="7" Opacity="0.32"/>
+                    </Border.Effect>
+                </Border>
+
+                <!-- 面板：内部玻璃透射层 -->
+
+                <Border CornerRadius="36"
+                        Opacity="0.45"
+                        IsHitTestVisible="False">
+                    <Border.Background>
+                        <RadialGradientBrush RadiusX="1.5" RadiusY="1.5" GradientOrigin="0.35,0.25">
+                            <GradientStop Color="#E8FFFFFF" Offset="0"/>
+                            <GradientStop Color="#70FFFFFF" Offset="0.18"/>
+                            <GradientStop Color="#25FFFFFF" Offset="0.55"/>
+                            <GradientStop Color="#00FFFFFF" Offset="1"/>
+                        </RadialGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <!-- 面板：动态流动高光层 -->
+
+                <Border CornerRadius="36"
+                        Opacity="0.38"
+                        IsHitTestVisible="False">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#B0FFFFFF" Offset="0"/>
+                            <GradientStop Color="#00FFFFFF" Offset="0.35"/>
+                            <GradientStop Color="#20FFFFFF" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <!-- 面板内容层：材质调节控件 -->
+
+                <Grid Margin="18,10,18,10">
+
+                    <!-- 第 0 行：材质滑块 + 右侧三个开关            -->
+                    <!-- 第 1 行：桌面图标处理模式（横跨两列）        -->
+
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="118"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="0"
+                                VerticalAlignment="Center">
+
+                        <!-- 背景透明度 0.1 - 1.0 -->
+                        <!-- 值会落盘到 %AppData%\GlassDock\Settings.json -->
+                        <!-- 写：DockOpacity_ValueChanged  读：LoadDockSettings -->
+                        <!-- XAML 里的 Value 只是"设计默认值"，       -->
+                        <!-- 启动后由代码用文件里存的值覆盖掉       -->
+
+                        <Grid Height="32">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="68"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="40"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="背景透明度"
+                                       FontSize="12"
+                                       Foreground="#E6FFFFFF"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="DockOpacitySlider"
+                                    Grid.Column="1"
+                                    Minimum="0.1"
+                                    Maximum="1.0"
+                                    Value="1.0"
+                                    SmallChange="0.05"
+                                    LargeChange="0.1"
+                                    IsMoveToPointEnabled="True"
+                                    Style="{StaticResource GlassSliderStyle}"
+                                    ValueChanged="DockOpacity_ValueChanged"/>
+                            <TextBlock x:Name="DockOpacityText"
+                                       Grid.Column="2"
+                                       Text="1.00"
+                                       FontSize="11"
+                                       Foreground="#B0FFFFFF"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- 背景模糊 0 - 100 -->
+
+                        <Grid Height="32">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="68"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="40"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="背景模糊"
+                                       FontSize="12"
+                                       Foreground="#E6FFFFFF"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="DockBlurSlider"
+                                    Grid.Column="1"
+                                    Minimum="0"
+                                    Maximum="100"
+                                    Value="0"
+                                    SmallChange="5"
+                                    LargeChange="10"
+                                    IsMoveToPointEnabled="True"
+                                    Style="{StaticResource GlassSliderStyle}"
+                                    ValueChanged="DockBlur_ValueChanged"/>
+                            <TextBlock x:Name="DockBlurText"
+                                       Grid.Column="2"
+                                       Text="0"
+                                       FontSize="11"
+                                       Foreground="#B0FFFFFF"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+
+                    </StackPanel>
+
+                    <!-- 右上角竖排：壁纸取色 + 位置锁定 + 开机自启动 -->
+
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="1"
+                                Width="110"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+
+                        <!-- 壁纸取色：把壁纸主色揉进玻璃（高级选项） -->
+
+                        <Border x:Name="WallpaperTintButton"
+                                Height="34"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Center"
+                                CornerRadius="17"
+                                Background="#3DFFFFFF"
+                                BorderThickness="1"
+                                BorderBrush="#80FFFFFF"
+                                Cursor="Hand"
+                                RenderTransformOrigin="0.5,0.5"
+                                MouseLeftButtonUp="WallpaperTintButton_Click"
+                                MouseEnter="WallpaperTintButton_MouseEnter"
+                                MouseLeave="WallpaperTintButton_MouseLeave">
+
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="WallpaperTintButtonScale"
+                                                ScaleX="1"
+                                                ScaleY="1"/>
+                            </Border.RenderTransform>
+
+                            <TextBlock x:Name="WallpaperTintText"
+                                       Text="壁纸取色"
+                                       FontSize="11.5"
+                                       Foreground="#F0FFFFFF"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"/>
+
+                        </Border>
+
+                        <!-- ================================= -->
+                        <!-- 位置锁定开关：半透明玻璃 ToggleSwitch -->
+                        <!-- 勾选 = 锁定 Dock 位置（不再拖动）     -->
+                        <!-- 取消 = 解锁，恢复按住拖动            -->
+                        <!-- 拨动立即生效，不需要确认             -->
+                        <!-- 代码侧：LockToggle_Changed 写入     -->
+                        <!--         isLocked                    -->
+                        <!--         UpdateLockToggleState 回写   -->
+                        <!-- 点击图标启动 / 展板 / 齿轮都不受影响  -->
+                        <!-- ================================= -->
+
+                        <Grid Height="30"
+                              Margin="0,6,0,0">
+
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0"
+                                       Text="锁定位置"
+                                       FontSize="11"
+                                       Foreground="#E6FFFFFF"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"/>
+
+                            <CheckBox x:Name="LockToggle"
+                                      Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      Style="{StaticResource GlassToggleSwitchStyle}"
+                                      Checked="LockToggle_Changed"
+                                      Unchecked="LockToggle_Changed"/>
+
+                        </Grid>
+
+                        <!-- ================================= -->
+                        <!-- 开机自启动开关：半透明玻璃 ToggleSwitch -->
+                        <!-- 勾选 = 写入注册表，随系统一起启动       -->
+                        <!-- 取消 = 从注册表里删掉这一项            -->
+                        <!-- 路径：HKCU\Software\Microsoft\        -->
+                        <!--       Windows\CurrentVersion\Run      -->
+                        <!-- 键名：AeroDock                        -->
+                        <!-- 键值 = "程序完整路径"（带英文双引号，   -->
+                        <!--        路径含空格也能正常启动）         -->
+                        <!-- 代码侧：StartupToggle_Changed 写注册表 -->
+                        <!--         UpdateStartupToggleState 回写  -->
+                        <!-- 窗口加载时自动读注册表，存在就勾选      -->
+                        <!-- ================================= -->
+
+                        <Grid Height="30"
+                              Margin="0,6,0,0">
+
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0"
+                                       Text="开机自启动"
+                                       FontSize="11"
+                                       Foreground="#E6FFFFFF"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"/>
+
+                            <CheckBox x:Name="StartupToggle"
+                                      Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      Style="{StaticResource GlassToggleSwitchStyle}"
+                                      Checked="StartupToggle_Changed"
+                                      Unchecked="StartupToggle_Changed"/>
+
+                        </Grid>
+
+                    </StackPanel>
+
+                    <!-- ================================= -->
+                    <!-- 桌面图标处理模式：两个玻璃药丸二选一     -->
+                    <!-- 保留在桌面（默认）：拖入只记路径，       -->
+                    <!--   桌面文件一动不动（就是现在的模式A）    -->
+                    <!-- 收纳至 Dock：桌面上的 .lnk / .exe 移进   -->
+                    <!--   %AppData%\GlassDock\Shortcuts        -->
+                    <!-- 代码侧：IconModeKeep_Checked /          -->
+                    <!--         IconModeStore_Checked            -->
+                    <!--         SetDockIconMode / 模式落盘       -->
+                    <!-- ================================= -->
+
+                    <Grid Grid.Row="1"
+                          Grid.ColumnSpan="2"
+                          Height="28"
+                          Margin="0,8,0,0">
+
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   Text="桌面图标处理模式"
+                                   FontSize="11"
+                                   Foreground="#E6FFFFFF"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False"/>
+
+                        <RadioButton x:Name="IconModeKeepRadio"
+                                     Grid.Column="1"
+                                     GroupName="DockIconModeGroup"
+                                     Content="保留在桌面"
+                                     Margin="0,0,8,0"
+                                     VerticalAlignment="Center"
+                                     Style="{StaticResource GlassRadioPillStyle}"
+                                     Checked="IconModeKeep_Checked"/>
+
+                        <RadioButton x:Name="IconModeStoreRadio"
+                                     Grid.Column="2"
+                                     GroupName="DockIconModeGroup"
+                                     Content="收纳至 Dock"
+                                     VerticalAlignment="Center"
+                                     Style="{StaticResource GlassRadioPillStyle}"
+                                     Checked="IconModeStore_Checked"/>
+
+                    </Grid>
+
+                </Grid>
+
+            </Grid>
+        </Border>
+
+
+
+        <!-- ================================= -->
+        <!-- 图标悬停名称气泡（自定义 ToolTip）    -->
+        <!-- ================================= -->
+        <!-- 位置：Dock / 展板图标的正上方          -->
+        <!--       代码用 TranslatePoint 算出来，   -->
+        <!--       上方空间不够就自动翻到图标下面    -->
+        <!-- 层级：ZIndex=9000                     -->
+        <!--       压过 Dock(10) / 拖拽层(200) /    -->
+        <!--       设置面板(2)，永远在最上面         -->
+        <!-- 命中：整层 IsHitTestVisible=False      -->
+        <!--       鼠标永远落不到气泡上，不会抖动     -->
+        <!-- 材质：与 Dock 同一套液态玻璃配方        -->
+        <!--       顶部透射 → 玻璃厚度 → 深色折射     -->
+        <!--       圆角 + 微小投影 + 左上角液态高光   -->
+        <!-- 动画：Opacity 0 → 1 淡入淡出            -->
+        <!--       锚点在气泡底边，像从图标里冒出来    -->
+        <!-- 居中：Canvas.Left 由 PositionIconTip 算，  -->
+        <!--       永远 = 图标水平中心 - 气泡宽 / 2      -->
+        <!--       MaxWidth="320" 只是"设计上限"，       -->
+        <!--       代码会按图标离窗口左右边的距离临时收紧，-->
+        <!--       保证居中一定摆得下，不会被迫左右夹偏移   -->
+        <!--       缩放锚点 0.5,1 是左右对称的，           -->
+        <!--       淡入放大不会带来横向位移               -->
+        <!-- 逻辑：MainWindow.xaml.cs 的 IconTip_*   -->
+        <!--       / QueueIconTip / ShowIconTip 等   -->
+        <!-- ================================= -->
+
+        <Canvas x:Name="IconTipLayer"
+                Panel.ZIndex="9000"
+                IsHitTestVisible="False">
+
+            <!-- 首次悬停错位修复：                       -->
+            <!-- 气泡第一次量出真实宽高时会发 SizeChanged， -->
+            <!-- 代码用它 + UpdateLayout() 在渲染前        -->
+            <!-- 再用真实 ActualWidth 重新居中一次        -->
+            <!-- 材质 / 淡入淡出动画完全不变               -->
+
+            <Border x:Name="IconTip"
+                    Canvas.Left="0"
+                    Canvas.Top="0"
+                    MaxWidth="320"
+                    CornerRadius="14"
+                    BorderThickness="1"
+                    BorderBrush="#7AFFFFFF"
+                    Opacity="0"
+                    IsHitTestVisible="False"
+                    SizeChanged="IconTip_SizeChanged"
+                    RenderTransformOrigin="0.5,1">
+
+                <!-- 锚点在底边中心：淡入时从图标那头长出来 -->
+
+                <Border.RenderTransform>
+
+                    <ScaleTransform x:Name="IconTipScale"
+                                    ScaleX="0.94"
+                                    ScaleY="0.94"/>
+
+                </Border.RenderTransform>
+
+                <!-- 微小投影：和 Dock 一样的浮起感 -->
+
+                <Border.Effect>
+
+                    <DropShadowEffect
+                        BlurRadius="16"
+                        ShadowDepth="3"
+                        Direction="270"
+                        Opacity="0.30"
+                        Color="#04070D"/>
+
+                </Border.Effect>
+
+                <!-- 玻璃本体：颜色与 DockGlassBase 完全一致 -->
+
+                <Border.Background>
+
+                    <LinearGradientBrush
+                        StartPoint="0,0"
+                        EndPoint="1,1">
+
+                        <!-- 顶部透射 -->
+
+                        <GradientStop
+                            Color="#B8FFFFFF"
+                            Offset="0"/>
+
+                        <!-- 中间玻璃厚度 -->
+
+                        <GradientStop
+                            Color="#70304050"
+                            Offset="0.35"/>
+
+                        <!-- 底部深色折射 -->
+
+                        <GradientStop
+                            Color="#D0081018"
+                            Offset="1"/>
+
+                    </LinearGradientBrush>
+
+                </Border.Background>
+
+                <Grid>
+
+                    <!-- 液态高光：左上角一团白光 -->
+
+                    <Border CornerRadius="13"
+                            IsHitTestVisible="False">
+
+                        <Border.Background>
+
+                            <RadialGradientBrush
+                                GradientOrigin="0.22,0"
+                                Center="0.22,0"
+                                RadiusX="0.95"
+                                RadiusY="0.9">
+
+                                <GradientStop
+                                    Color="#78FFFFFF"
+                                    Offset="0"/>
+
+                                <GradientStop
+                                    Color="#00FFFFFF"
+                                    Offset="1"/>
+
+                            </RadialGradientBrush>
+
+                        </Border.Background>
+
+                    </Border>
+
+                    <!-- 应用 / 文件名 -->
+
+                    <TextBlock x:Name="IconTipText"
+                               Margin="14,7"
+                               FontSize="12.5"
+                               FontWeight="SemiBold"
+                               Foreground="White"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               IsHitTestVisible="False">
+
+                        <TextBlock.Effect>
+
+                            <DropShadowEffect
+                                BlurRadius="4"
+                                ShadowDepth="1"
+                                Direction="270"
+                                Opacity="0.55"
+                                Color="#000000"/>
+
+                        </TextBlock.Effect>
+
+                    </TextBlock>
+
+                </Grid>
+
+            </Border>
+
+        </Canvas>
+
+
+
+    </Grid>
+
+
+
+
+
+</Window>

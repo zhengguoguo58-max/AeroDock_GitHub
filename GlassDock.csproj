@@ -1,0 +1,60 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+
+    <OutputType>WinExe</OutputType>
+
+    <TargetFramework>net8.0-windows</TargetFramework>
+
+    <Nullable>enable</Nullable>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <UseWPF>true</UseWPF>
+
+    <!-- 系统托盘图标用 NotifyIcon，需要打开 WinForms 支持 -->
+    <!-- 打开后 SDK 会自动补 FrameworkReference: Microsoft.WindowsDesktop.App -->
+    <!-- WPF 与 WinForms 可同时存在，互不影响 -->
+
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <AssemblyName>AeroDock</AssemblyName>
+
+    <RootNamespace>GlassDock</RootNamespace>
+
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+  </PropertyGroup>
+
+
+  <ItemGroup>
+
+    <Resource Include="Assets\app.ico" />
+
+    <PackageReference Include="System.Drawing.Common" Version="8.0.11" />
+
+  </ItemGroup>
+
+
+  <!-- ============================================================ -->
+  <!-- 关键：关掉 WinForms 自动注入的全局 using                      -->
+  <!-- UseWindowsForms=true 时 SDK 会给每个 .cs 文件注入：            -->
+  <!--     global using System.Drawing;                             -->
+  <!--     global using System.Windows.Forms;                       -->
+  <!-- 而这两个命名空间里的 Application / MessageBox / Point /       -->
+  <!-- Size / Brush / Color 等会和 WPF 的 System.Windows 撞名，      -->
+  <!-- 导致全项目大面积 CS0104 二义性编译错误。                       -->
+  <!-- 这里把两条自动 using 摘掉：WinForms 只在 MainWindow 里        -->
+  <!-- 用别名 using WinForms = System.Windows.Forms; 按需引入。       -->
+  <!-- ============================================================ -->
+
+  <ItemGroup>
+
+    <Using Remove="System.Windows.Forms" />
+
+    <Using Remove="System.Drawing" />
+
+  </ItemGroup>
+
+
+</Project>
